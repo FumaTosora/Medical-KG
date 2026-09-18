@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.venv/
+*.pyc
+data/
+.idea/
+sapbert_embedding_builder/CONCEPT.csv
+sapbert_embedding_builder/CONCEPT_SYNONYM.csv
+sapbert_embedding_builder/*.npy

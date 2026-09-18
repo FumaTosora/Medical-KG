@@ -1,0 +1,10 @@
+=== SQLite ===
+SQLite: Connection OK
+SQLite FAILED: OperationalError: no such table: entities_for_neo4j
+=== Neo4j ===
+  URI: neo4j://127.0.0.1:7687
+  User: neo4j
+  Database: medical-kg
+  Password set: True
+Neo4j: Connection OK
+Neo4j FAILED: ClientError: {neo4j_code: Neo.ClientError.Database.DatabaseNotFound} {message: Unable to get a routing table for database 'medical-kg' because this database does not exist} {gql_status: 22000} {gql_status_description: error: data exception}

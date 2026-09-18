@@ -1,0 +1,6 @@
+openai
+python-dotenv
+neo4j
+sentence-transformers
+sqlite-vec
+numpy
