@@ -106,50 +106,50 @@ The outer bin loop catches exceptions per bin and continues to the next one rath
 ```mermaid
 flowchart TD
     subgraph Driver["scripts/build_kg_from_folder.py"]
-        start([__main__: take stay_dir argument,\nwalk bin_* subfolders])
-        start --> initonce[init_db once\ncreates entities_for_neo4j,\nrelations_for_neo4j,\ngeneral_concept tables]
+        start([__main__: take stay_dir argument, walk bin_* subfolders])
+        start --> initonce[init_db once creates entities_for_neo4j, relations_for_neo4j,general_concept tables]
         initonce --> loop[For each bin folder]
         loop --> bin_check{Has files?}
         bin_check -->|no| skip[Skip bin]
-        bin_check -->|yes| prefix[_bin_id_prefix\nparse subject_id, stay_id\nfrom path]
+        bin_check -->|yes| prefix[_bin_id_prefix parse subject_id, stay_id from path]
     end
 
     subgraph Pass1["Pass 1 – Extraction (LLM #1)"]
-        prefix --> send[send_folder_to_model\nattach all files as base64,\nsend first-pass prompt]
-        send --> p1prompt{{"First-pass prompt:\n• atomic decomposition rule\n• spine REQUIRED Patient+HospitalAdmission(+EDStay)\n• type whitelist\n• worked example with trunk edges"}}
-        p1prompt --> retry1{{call_with_retry\nup to 100 attempts\nexp backoff 1s→120s}}
-        retry1 --> llm1[(LLM\nvia OpenAI-compatible API)]
-        llm1 -->|success| csv_out[Raw CSV response\nentities + relations blocks]
+        prefix --> send[send_folder_to_model attach all files as base64, send first-pass prompt]
+        send --> p1prompt{{"First-pass prompt: • atomic decomposition rule • spine REQUIRED Patient+HospitalAdmission(+EDStay) • type whitelist • worked example with trunk edges"}}
+        p1prompt --> retry1{{call_with_retry up to 100 attempts exp backoff 1s→120s}}
+        retry1 --> llm1[(LLM via OpenAI-compatible API)]
+        llm1 -->|success| csv_out[Raw CSV response entities + relations blocks]
         llm1 -->|transient error| retry1
         csv_out --> debug[Write debug_raw_response_*.txt]
     end
 
     subgraph Postproc["Driver post-processing"]
-        debug --> parse[_parse_csv_response\nsplit into entities/relations dicts]
-        parse --> stripvals[_strip_values_from_concept_entities\nremove value/unit from\nMeasurement + Observation nodes]
-        stripvals --> stamp[_enforce_id_prefix\nre-stamp any ids missing the bin prefix]
-        stamp --> natkey[_assign_natural_key_ids\nPatient + subject_id → patient_X\nHospitalAdmission + hadm_id → admission_X\nEDStay + stay_id → edstay_X\nICUStay + icustay_id → icustay_X\nFile + source_path → file_hash\npropagate via id_map to relations]
+        debug --> parse[_parse_csv_response split into entities/relations dicts]
+        parse --> stripvals[_strip_values_from_concept_entities remove value/unit from Measurement + Observation nodes]
+        stripvals --> stamp[_enforce_id_prefix re-stamp any ids missing the bin prefix]
+        stamp --> natkey[_assign_natural_key_ids Patient + subject_id → patient_X HospitalAdmission + hadm_id → admission_X EDStay + stay_id → edstay_X ICUStay + icustay_id → icustay_X File + source_path → file_hash propagate via id_map to relations]
     end
 
     subgraph Pass2["Pass 2 – Merge / normalize (LLM #2 tool-calling loop)"]
-        natkey --> merge[_run_incremental_llm_iteration\nbuild merge prompt with:\n• cross-bin dedup protocol\n• path-derived spine ids\n• OMOP + general-concept rules\n• OMOP-guided edge selection\n• type whitelist\n• canonical relation vocabulary]
-        merge --> retry2{{call_with_retry\nup to 100 attempts\nper tool-loop step}}
-        retry2 --> llm2[(LLM agent\nup to 50 tool steps)]
+        natkey --> merge[_run_incremental_llm_iteration build merge prompt with: • cross-bin dedup protocol • path-derived spine ids • OMOP + general-concept rules • OMOP-guided edge selection • type whitelist • canonical relation vocabulary]
+        merge --> retry2{{call_with_retry up to 100 attempts per tool-loop step}}
+        retry2 --> llm2[(LLM agent up to 50 tool steps)]
         llm2 -->|transient error| retry2
 
-        llm2 -->|"step: SELECT existing"| sql_select[execute_sql:\nSELECT to find existing\nPatient/HospitalAdmission/EDStay by subject_id/hadm_id/stay_id]
-        llm2 -->|"step: clinical lookup"| omop[lookup_omop_concepts\n3-tier: exact → synonym → vector\n6.4M OMOP concepts]
-        llm2 -->|"step: OMOP edge lookup"| omoprel[lookup_omop_relation\nconcept_relationship JOIN relationship\nreturns relationship_id as edge type]
-        llm2 -->|"step: non-clinical lookup"| genlk[lookup_general_concepts\nsame 3 tiers,\nLLM-coined registry]
-        llm2 -->|"step: register new general concept"| genup[upsert_general_concept\nstore broader category\n+ source term as synonym]
-        llm2 -->|"step: write entity"| up[upsert_entity\nidentity rewrite + attribute merge\nname-rename guarded by trigger]
-        llm2 -->|"step: write relations / stitch orphans"| sql_ins[execute_sql:\nINSERT INTO relations_for_neo4j\nON CONFLICT DO UPDATE]
+        llm2 -->|"step: SELECT existing"| sql_select[execute_sql: SELECT to find existing Patient/HospitalAdmission/EDStay by subject_id/hadm_id/stay_id]
+        llm2 -->|"step: clinical lookup"| omop[lookup_omop_concepts 3-tier: exact → synonym → vector 6.4M OMOP concepts]
+        llm2 -->|"step: OMOP edge lookup"| omoprel[lookup_omop_relation concept_relationship JOIN relationship returns relationship_id as edge type]
+        llm2 -->|"step: non-clinical lookup"| genlk[lookup_general_concepts same 3 tiers, LLM-coined registry]
+        llm2 -->|"step: register new general concept"| genup[upsert_general_concept store broader category + source term as synonym]
+        llm2 -->|"step: write entity"| up[upsert_entity identity rewrite + attribute merge name-rename guarded by trigger]
+        llm2 -->|"step: write relations / stitch orphans"| sql_ins[execute_sql: INSERT INTO relations_for_neo4j ON CONFLICT DO UPDATE]
 
         sql_select --> llm2
         omop --> llm2
         omoprel --> llm2
         genlk --> llm2
-        genup --> store2[(general_concept\n+ vector index)]
+        genup --> store2[(general_concept + vector index)]
         store2 --> llm2
         up --> store[(entities_for_neo4j)]
         sql_ins --> store_rel[(relations_for_neo4j)]
@@ -162,13 +162,13 @@ flowchart TD
     subgraph Sync["After all bins"]
         report --> next{More bins?}
         next -->|yes| loop
-        next -->|no| neo[sync_to_neo4j\nclear graph, recreate from SQLite,\napply canonical rel types]
+        next -->|no| neo[sync_to_neo4j clear graph, recreate from SQLite, apply canonical rel types]
         neo --> neoDB[(Neo4j)]
         neoDB --> done([Done])
     end
 
     subgraph Fault["Per-bin failure path"]
-        exc([Exception]) -->|log + append to failed_bins| faillog[print error + traceback\ncontinue to next bin]
+        exc([Exception]) -->|log + append to failed_bins| faillog[print error + traceback continue to next bin]
         faillog --> next
     end
 
